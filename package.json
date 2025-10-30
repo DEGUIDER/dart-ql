@@ -1,0 +1,50 @@
+{
+  "name": "dart-ql",
+  "version": "1.0.0",
+  "description": "Generate GraphQL fragments and Dart models for Flutter projects",
+  "main": "bin/index.js",
+  "bin": {
+    "dartql": "./bin/index.js",
+    "dart-ql": "./bin/index.js"
+  },
+  "scripts": {
+    "start": "node ./bin/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "graphql",
+    "flutter",
+    "dart",
+    "codegen",
+    "schema"
+  ],
+  "author": "Hadi Badjah <hbadjah@gmail.com> (https://github.com/deguider)",
+  "license": "MIT",
+  "packageManager": "pnpm@10.17.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deguider/dart-ql.git"
+  },
+  "homepage": "https://github.com/deguider/dart-ql#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "src",
+    "package.json",
+    "README.md"
+  ],
+  "dependencies": {
+    "commander": "^14.0.2",
+    "fs-extra": "^11.3.2",
+    "graphql": "^16.11.0"
+  },
+  "devDependencies": {
+    "@types/commander": "^2.12.5",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^24.9.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
