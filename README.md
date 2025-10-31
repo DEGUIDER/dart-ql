@@ -85,12 +85,13 @@ if it generates an admin.gql and an admin-role.gql and the latter only contains 
 
 ## ⚙️ Options
 Option	Alias	Description
+```
 --schema <path>	-s	Path to a local .graphql schema file
 --from-url <url>	-u	Download schema dynamically from an endpoint
 --out <path>	-o	Output folder for generated .gql files
 --build-runner	-b	Automatically run Flutter build_runner after generation
 --raw	-r	Generate all fragments (including connections, edges, filters)
-
+```
 Example:
 
 dart-ql -u https://graphqlplaceholder.vercel.app/graphql -o ./lib/core/graphql 
@@ -158,7 +159,7 @@ fragment productFragment on product {
 
 🚨 this package's main purpose is to save you time, however currently it will not fully setup your graphql project, you will still need to manually setup your GraphQLProvider, Client and link inside your flutter project.
 
-🧪 Requirements
+### 🧪 Requirements
 
 Node.js >= 18
 
@@ -167,7 +168,7 @@ A valid GraphQL schema file or endpoint
 Flutter project using build_runner + a GraphQL client
 
 
-🤝 Contributing
+### 🤝 Contributing
 
 Contributions, feedback, and PRs are welcome!
 If you find bugs or want to suggest improvements:
@@ -176,7 +177,7 @@ Open an issue
 
 Or fork and submit a pull request
 
-🗺️ Roadmap
+### 🗺️ Roadmap
 
  Add ability for custom fine tuning and customization.
 
@@ -185,13 +186,13 @@ Or fork and submit a pull request
  Maybe switch to using Typescript instead of Javascript in the future.
 
 
-🧑‍💻 Author
+### 🧑‍💻 Author
 
-Hadi Badjah
+Hadi Badjah - Deguider
 GitHub
  · npm
 
-🪪 License
+### 🪪 License
 
 This project is licensed under the MIT License.
 See the LICENSE
