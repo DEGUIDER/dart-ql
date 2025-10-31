@@ -80,7 +80,7 @@ Skip repetitive GraphQL boilerplate
 
 After first generation you can change, move queries, mutations and subscriptions to  other files and dart-ql will keep it like that. e.g:
 ```
-if it generates an admin.gql and an admin-role.gql the latter only contains one query, you can move that query to admin.gql and delete admin-role.gql and in the next generation it will keep it like that, it will still update the queries if something changes but it will keep it inside admin.gql, I hope this is clear haha.
+if it generates an admin.gql and an admin-role.gql and the latter only contains one query, you can move that query to admin.gql and delete admin-role.gql and in the next generation it will keep it like that, it will still update the queries if something changes but it will keep it inside admin.gql, I hope this is clear haha.
 ```
 
 ## ⚙️ Options
