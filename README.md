@@ -96,30 +96,31 @@ Example:
 dart-ql -u https://graphqlplaceholder.vercel.app/graphql -o ./lib/core/graphql 
 
 ##   🏗️ Example Output Structure
+```
 lib/core/graphql/
  ├─ fragments/
  │   ├─ user.fragment.gql
- │   ├─ post.fragment.gql
- │   └─ comment.fragment.gql
+ │   ├─ message.fragment.gql
+ │   └─ product.fragment.gql
  ├─ documents/
  │   ├─ user.gql
  │   ├─ admin.gql
  │   └─ product.gql
  └─ schema.gql
-
+```
 
 Each file contains optimized GraphQL operations and reusable fragments.
 
-🔄 Integration with Flutter
+## 🔄 Integration with Flutter
 
-Once generated, you can run:
+- Once generated, you can run:
 
 flutter pub run build_runner build --delete-conflicting-outputs to generate the .gql.dart files that contain the graphql variables and options
 
 
 
 
-If you pass --build-runner, dart-ql can run that for you automatically (not recommended, always make sure you generated gql files are correct).
+If you pass --build-runner OR -b , dart-ql can run that for you automatically after the gql files are generated (not recommended, always make sure to double check if the gql files are correct).
 
 ##   🧩 Why dart-ql?
 
@@ -155,6 +156,7 @@ fragment productFragment on product {
 
 🧱 If you make any change to the operations  (querries, mutations, subscriptions) or merge two .gql files together inside the documents folder, the next time you run dart-ql it will not remove them or change them back, it will remember those changes.
 
+🚨 this package's main purpose is to save you time, however currently it will not fully setup your graphql project, you will still need to manually setup your GraphQLProvider, Client and link inside your flutter project.
 
 🧪 Requirements
 
