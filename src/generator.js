@@ -8,8 +8,12 @@ const {
 } = require("graphql");
 const path = require("path");
 
+// Flag for raw generation mode
 const RAW_MODE = process.argv.includes("-r") || process.argv.includes("--raw");
 
+/**
+ * Converts a string to kebab-case.
+ */
 function toKebabCase(str) {
   return str
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
@@ -17,12 +21,18 @@ function toKebabCase(str) {
     .toLowerCase();
 }
 
+/**
+ * Recursively unwraps a type to its base type name.
+ */
 function unwrapTypeName(type) {
   let t = type;
   while (t.ofType) t = t.ofType;
   return t.name;
 }
 
+/**
+ * Formats GraphQL types into a readable type string (with [] and !).
+ */
 function formatTypeString(type) {
   if (isNonNullType(type)) return `${formatTypeString(type.ofType)}!`;
   if (isListType(type)) return `[${formatTypeString(type.ofType)}]`;
@@ -30,30 +40,34 @@ function formatTypeString(type) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 🧩 FRAGMENT HANDLING (updated section only) */
+/* FRAGMENT HANDLING */
 /* -------------------------------------------------------------------------- */
 
-// ---------------- Dynamic Interface/Union Handling ----------------
+/**
+ * Generates fields for a fragment recursively, including interface/union cases.
+ */
 function generateFragmentFields(type, schema, depth = 0, seen = new Set(), parentPath = "", globalFieldPaths = new Map()) {
   if (!type.getFields) return [];
-  if (depth > 5) return []; // avoid infinite recursion
+  if (depth > 5) return []; // prevent infinite recursion
 
   const fields = Object.values(type.getFields());
   const result = [];
 
-  let ifaceFieldNames = new Set();
+  // Collect interface field names for de-duplication
+  const ifaceFieldNames = new Set();
   try {
     const interfaces = typeof type.getInterfaces === "function" ? type.getInterfaces() : [];
     for (const iface of interfaces) {
-      if (iface && iface.getFields) {
-        Object.keys(iface.getFields()).forEach(n => ifaceFieldNames.add(n));
+      if (iface?.getFields) {
+        Object.keys(iface.getFields()).forEach(name => ifaceFieldNames.add(name));
       }
     }
   } catch (_) { }
 
+  // Handle implemented interfaces
   if (typeof type.getInterfaces === "function") {
     const interfaces = type.getInterfaces();
-    if (interfaces && interfaces.length > 0) {
+    if (interfaces?.length) {
       for (const iface of interfaces) {
         if (!iface?.name) continue;
         result.push(`...${iface.name.charAt(0).toLowerCase() + iface.name.slice(1)}Fragment`);
@@ -61,18 +75,20 @@ function generateFragmentFields(type, schema, depth = 0, seen = new Set(), paren
     }
   }
 
+  // Process each field on the type
   for (const field of fields) {
     const fieldName = field.name;
     const fieldTypeName = unwrapTypeName(field.type);
     const nestedType = schema.getType(fieldTypeName);
-
     const fullPath = parentPath ? `${parentPath}.${fieldName}` : fieldName;
 
-    const IGNORED_DUPLICATE_FIELDS = new Set(["nodes", "pageInfo", "totalCount"]);
-    if (!IGNORED_DUPLICATE_FIELDS.has(fieldName)) {
+    const IGNORED_DUPLICATES = new Set(["nodes", "pageInfo", "totalCount"]);
+
+    // Warn on duplicate fields for better debugging
+    if (!IGNORED_DUPLICATES.has(fieldName)) {
       if (globalFieldPaths.has(fieldName)) {
         console.warn(
-          `⚠️ Duplicate field detected: '${fieldName}' appears at '${fullPath}' and '${globalFieldPaths.get(fieldName)}'`
+          `⚠️ Duplicate field: '${fieldName}' at '${fullPath}' (previous: '${globalFieldPaths.get(fieldName)}')`
         );
       } else {
         globalFieldPaths.set(fieldName, fullPath);
@@ -83,15 +99,17 @@ function generateFragmentFields(type, schema, depth = 0, seen = new Set(), paren
     if (ifaceFieldNames.has(fieldName)) continue;
     if (fieldTypeName === "ConnectionCursor") continue;
 
-    // ---------- Dynamic interface/union handling ----------
+    // Handle interface or union field types
     if (nestedType?.astNode?.kind === "InterfaceTypeDefinition" || nestedType?.astNode?.kind === "UnionTypeDefinition") {
       const possibleTypes = schema.getPossibleTypes?.(nestedType) || [];
-      const inlineFragments = possibleTypes.map(pt => `... on ${pt.name} { ...${pt.name.charAt(0).toLowerCase() + pt.name.slice(1)}Fragment }`).join("\n    ");
+      const inlineFragments = possibleTypes
+        .map(pt => `... on ${pt.name} { ...${pt.name.charAt(0).toLowerCase() + pt.name.slice(1)}Fragment }`)
+        .join("\n    ");
       result.push(`${fieldName} {\n    ${inlineFragments}\n  }`);
       continue;
     }
 
-    // normal nested fragment
+    // Regular nested fragments (non-scalar)
     if (nestedType && nestedType.getFields && !isScalarType(nestedType)) {
       const fragName = `${fieldTypeName.charAt(0).toLowerCase() + fieldTypeName.slice(1)}Fragment`;
       if (!/Filter|Edge|Connection|PageInfo|Sort/.test(fieldTypeName)) {
@@ -100,12 +118,12 @@ function generateFragmentFields(type, schema, depth = 0, seen = new Set(), paren
       }
     }
 
-    // scalar or nested fallback
+    // Fallback for nested or scalar fields
     if (nestedType?.getFields && !isScalarType(nestedType)) {
       seen.add(fieldTypeName);
-      const subfields = generateFragmentFields(nestedType, schema, depth + 1, seen, fullPath, globalFieldPaths);
-      const inner = subfields.length ? `{\n    ${subfields.join("\n    ")}\n  }` : "";
-      result.push(`${fieldName} ${inner}`);
+      const subFields = generateFragmentFields(nestedType, schema, depth + 1, seen, fullPath, globalFieldPaths);
+      const body = subFields.length ? `{\n    ${subFields.join("\n    ")}\n  }` : "";
+      result.push(`${fieldName} ${body}`);
     } else {
       result.push(fieldName);
     }
@@ -114,6 +132,9 @@ function generateFragmentFields(type, schema, depth = 0, seen = new Set(), paren
   return result;
 }
 
+/**
+ * Builds a complete GraphQL fragment string for a given type.
+ */
 function generateFragment(typeName, schema) {
   const type = schema.getType(typeName);
   if (!type?.getFields) return "";
@@ -123,16 +144,21 @@ function generateFragment(typeName, schema) {
   return `fragment ${fragName} on ${typeName} {\n  ${fields.join("\n  ")}\n}`;
 }
 
-// helper for scalar fallback
+/**
+ * Unwraps a type recursively to its innermost layer.
+ */
 function unwrapType(t) {
   while (t?.ofType) t = t.ofType;
   return t;
 }
+
+/**
+ * Picks a minimal set of scalar fields for a type — used when resolving fragment cycles.
+ */
 function getMinimalScalarFields(typeName, schema) {
   const t = schema.getType(typeName);
   if (!t?.getFields) return ["id"];
 
-  // extract all scalar fields
   const scalarFields = Object.values(t.getFields())
     .filter(f => isScalarType(unwrapType(f.type)))
     .map(f => ({
@@ -140,51 +166,48 @@ function getMinimalScalarFields(typeName, schema) {
       nonNull: isNonNullType(f.type) || (f.type.ofType && isNonNullType(f.type.ofType)),
     }));
 
-  // assign heuristic priority (not hardcoded per type)
+  // Simple scoring to prioritize key fields
   const score = f => {
     let s = 0;
     if (f.nonNull) s += 2;
     if (/id|name|title|email|type/i.test(f.name)) s += 1;
-    if (f.name.length <= 5) s += 0.5; // short, likely core field
+    if (f.name.length <= 5) s += 0.5;
     return s;
   };
 
-  // sort by score descending
   scalarFields.sort((a, b) => score(b) - score(a));
 
-  // always include all non-nullables + top 3 nullable fields
-  const nonNullFields = scalarFields.filter(f => f.nonNull).map(f => f.name);
-  const nullableFields = scalarFields.filter(f => !f.nonNull).map(f => f.name);
-  const chosen = [...nonNullFields, ...nullableFields.slice(0, 3)];
+  const nonNull = scalarFields.filter(f => f.nonNull).map(f => f.name);
+  const nullable = scalarFields.filter(f => !f.nonNull).map(f => f.name);
+  const selected = [...nonNull, ...nullable.slice(0, 3)];
 
-  return chosen.length ? chosen : ["id"];
+  return selected.length ? selected : ["id"];
 }
 
-
 /* -------------------------------------------------------------------------- */
-/* ⬇️ Everything below is restored to your original version (no changes) */
+/* OPERATION HANDLING */
 /* -------------------------------------------------------------------------- */
 
 function generateArgsString(args, inputs) {
-  if (!args || args.length === 0) return { vars: "", args: "" };
+  if (!args || !args.length) return { vars: "", args: "" };
 
   const vars = [];
   const argAssignments = [];
 
-  for (const a of args) {
-    if (!a?.type) continue;
-    const argTypeName = unwrapTypeName(a.type);
+  for (const arg of args) {
+    if (!arg?.type) continue;
+    const argTypeName = unwrapTypeName(arg.type);
     if (argTypeName === "ConnectionCursor") continue;
 
     const inputType = inputs[argTypeName];
-    if (inputType && inputType.getFields && a.name.toLowerCase() === "input") {
-      vars.push(`$${a.name}: ${formatTypeString(a.type)}`);
-      argAssignments.push(`${a.name}: $${a.name}`);
+    if (inputType?.getFields && arg.name.toLowerCase() === "input") {
+      vars.push(`$${arg.name}: ${formatTypeString(arg.type)}`);
+      argAssignments.push(`${arg.name}: $${arg.name}`);
       continue;
     }
 
-    vars.push(`$${a.name}: ${formatTypeString(a.type)}`);
-    argAssignments.push(`${a.name}: $${a.name}`);
+    vars.push(`$${arg.name}: ${formatTypeString(arg.type)}`);
+    argAssignments.push(`${arg.name}: $${arg.name}`);
   }
 
   if (!vars.length) return { vars: "", args: "" };
@@ -194,14 +217,18 @@ function generateArgsString(args, inputs) {
 function generateOperation(opType, opName, fieldName, field, returnTypeName, inputs) {
   let innerType = field.type;
   while (innerType.ofType) innerType = innerType.ofType;
-  const isSimpleReturn =
+
+  const simpleReturn =
     isScalarType(innerType) ||
     innerType.astNode?.kind === "EnumTypeDefinition" ||
     ["Boolean", "Int", "Float", "ID", "String"].includes(innerType.name);
+
   const { vars, args } = generateArgsString(field.args || [], inputs);
-  if (isSimpleReturn) {
+
+  if (simpleReturn) {
     return `${opType} ${opName}${vars} {\n  ${fieldName}${args}\n}`;
   }
+
   const fragName = `${returnTypeName.charAt(0).toLowerCase() + returnTypeName.slice(1)}Fragment`;
   return `${opType} ${opName}${vars} {\n  ${fieldName}${args} {\n    ...${fragName}\n  }\n}`;
 }
@@ -218,34 +245,29 @@ function mergeOperation(existingContent, newOpStr, fieldName) {
     if (!match) break;
 
     const [full, type, name, vars, body] = match;
-    const rootFieldMatch = body.match(/([a-zA-Z0-9_]+)\s*(\([^\)]*\))?/);
-    const rootField = rootFieldMatch ? rootFieldMatch[1] : null;
+    const rootMatch = body.match(/([a-zA-Z0-9_]+)\s*(\([^\)]*\))?/);
+    const rootField = rootMatch ? rootMatch[1] : null;
 
     if (rootField === fieldName) {
       foundExisting = true;
 
-      const newVarsMatch = newOpStr.match(/\(([^)]*)\)/);
-      const newVars = newVarsMatch ? `(${newVarsMatch[1]})` : "";
-      const hasBraces = /\{\s*\.\.\.[A-Za-z0-9_]+/.test(newOpStr);
+      const newVars = newOpStr.match(/\(([^)]*)\)/);
+      const varsStr = newVars ? `(${newVars[1]})` : "";
+      const hasFragments = /\{\s*\.\.\.[A-Za-z0-9_]+/.test(newOpStr);
 
-      if (!hasBraces) {
+      if (!hasFragments) {
         updatedContent = existingContent.replace(
           full,
-          `${type} ${name}${newVars} {\n  ${fieldName}${rootFieldMatch?.[2] || ""}\n}`
+          `${type} ${name}${varsStr} {\n  ${fieldName}${rootMatch?.[2] || ""}\n}`
         );
       } else {
-        const newFragMatch = newOpStr.match(/\.\.\.[A-Za-z0-9_]+/g) || [];
-        const existingFragMatch = body.match(/\.\.\.[A-Za-z0-9_]+/g) || [];
-        const mergedFrags = Array.from(new Set([...existingFragMatch, ...newFragMatch]));
-        const mergedBody = `  ${fieldName}${rootFieldMatch?.[2] || ""} {\n    ${mergedFrags.join(
-          "\n    "
-        )}\n  }`;
-
-        updatedContent = existingContent.replace(
-          full,
-          `${type} ${name}${newVars} {\n${mergedBody}\n}`
-        );
+        const newFrags = newOpStr.match(/\.\.\.[A-Za-z0-9_]+/g) || [];
+        const existingFrags = body.match(/\.\.\.[A-Za-z0-9_]+/g) || [];
+        const merged = Array.from(new Set([...existingFrags, ...newFrags]));
+        const mergedBody = `  ${fieldName}${rootMatch?.[2] || ""} {\n    ${merged.join("\n    ")}\n  }`;
+        updatedContent = existingContent.replace(full, `${type} ${name}${varsStr} {\n${mergedBody}\n}`);
       }
+
       break;
     }
   }
@@ -258,6 +280,7 @@ function mapExistingOperations(documentsDir) {
   const opMap = {};
   if (!fs.existsSync(documentsDir)) return opMap;
   const files = fs.readdirSync(documentsDir).filter(f => f.endsWith(".gql"));
+
   for (const file of files) {
     const content = fs.readFileSync(path.join(documentsDir, file), "utf8");
     const regex =
@@ -268,6 +291,7 @@ function mapExistingOperations(documentsDir) {
       opMap[fieldName] = { opName, file };
     }
   }
+
   return opMap;
 }
 
@@ -287,68 +311,65 @@ function generateGQLFiles(schemaPath, outDir) {
 
   const inputs = {};
   for (const type of Object.values(typeMap)) {
-    const kind = type.astNode?.kind;
-    if (!kind || type.name.startsWith("__")) continue;
-    if (kind === "InputObjectTypeDefinition") inputs[type.name] = type;
+    if (type.astNode?.kind === "InputObjectTypeDefinition") inputs[type.name] = type;
   }
 
   const existingOps = mapExistingOperations(documentsDir);
   const seenOps = new Set();
 
   const skipPattern = /Filter|Edge|Connection|PageInfo|OffsetPageInfo|Sort/;
-  const skipAutoCrud = /^(createOne|updateOne|deleteOne|upsertOne|aggregate|findMany|groupBy)/;
+  const skipCrud = /^(createOne|updateOne|deleteOne|upsertOne|aggregate|findMany|groupBy)/;
 
   const operations = [];
-  for (const [opTypeName, typeDef] of [
+
+  for (const [opType, typeDef] of [
     ["query", queryType],
     ["mutation", mutationType],
     ["subscription", subscriptionType],
   ]) {
     if (!typeDef) continue;
+
     for (const [fieldName, field] of Object.entries(typeDef.getFields())) {
       const returnTypeName = unwrapTypeName(field.type);
       if (skipPattern.test(returnTypeName)) continue;
-      if (!RAW_MODE && skipAutoCrud.test(fieldName)) continue;
-      operations.push({ opTypeName, fieldName, field, returnTypeName });
+      if (!RAW_MODE && skipCrud.test(fieldName)) continue;
+      operations.push({ opType, fieldName, field, returnTypeName });
     }
   }
 
-  for (const { opTypeName, fieldName, field, returnTypeName } of operations) {
+  // Generate or update operations
+  for (const { opType, fieldName, field, returnTypeName } of operations) {
     if (seenOps.has(fieldName)) continue;
     seenOps.add(fieldName);
-    const opInfo = existingOps[fieldName];
-    const opName = opInfo?.opName || fieldName;
-    const targetFile = opInfo
-      ? path.join(documentsDir, opInfo.file)
+
+    const existing = existingOps[fieldName];
+    const opName = existing?.opName || fieldName;
+    const targetFile = existing
+      ? path.join(documentsDir, existing.file)
       : path.join(documentsDir, `${toKebabCase(returnTypeName)}.gql`);
-    const newOpStr = generateOperation(opTypeName, opName, fieldName, field, returnTypeName, inputs);
-    let existingContent = fs.existsSync(targetFile)
-      ? fs.readFileSync(targetFile, "utf8")
-      : "";
-    const updatedContent = mergeOperation(existingContent, newOpStr, fieldName);
-    fs.writeFileSync(targetFile, updatedContent.trim() + "\n");
+
+    const newOpStr = generateOperation(opType, opName, fieldName, field, returnTypeName, inputs);
+    const existingContent = fs.existsSync(targetFile) ? fs.readFileSync(targetFile, "utf8") : "";
+    const updated = mergeOperation(existingContent, newOpStr, fieldName);
+    fs.writeFileSync(targetFile, updated.trim() + "\n");
   }
 
-  /* 🧩 fragment generation logic (cycle detection + fallback) */
+  /* Fragment generation with cycle detection and fallback inlining */
 
-  const skipRootTypes = [queryType?.name, mutationType?.name, subscriptionType?.name];
-
+  const skipRoot = [queryType?.name, mutationType?.name, subscriptionType?.name];
   const rawFragments = {};
   const fragmentDeps = {};
 
-  // Step 1: generate raw fragments and collect dependencies
+  // Generate raw fragments
   for (const typeName of Object.keys(typeMap)) {
     const type = typeMap[typeName];
-    if (!type?.getFields) continue;
     if (
-      typeName.startsWith("__") ||
-      type.astNode?.kind === "InputObjectTypeDefinition" ||
-      type.astNode?.kind === "EnumTypeDefinition" ||
-      type.astNode?.kind === "UnionTypeDefinition" ||
+      !type?.getFields ||
+      type.name.startsWith("__") ||
+      skipRoot.includes(typeName) ||
       skipPattern.test(typeName) ||
-      skipRootTypes.includes(typeName)
-    )
-      continue;
+      ["InputObjectTypeDefinition", "EnumTypeDefinition", "UnionTypeDefinition"].includes(type.astNode?.kind)
+    ) continue;
 
     const fragment = generateFragment(typeName, schema);
     if (!fragment) continue;
@@ -358,20 +379,17 @@ function generateGQLFiles(schemaPath, outDir) {
     fragmentDeps[typeName] = deps;
   }
 
-  // Step 2: detect only direct cycles (A ↔ B), not long indirect chains
+  // Detect simple cycles (A ↔ B)
   const cycles = [];
   for (const [a, depsA] of Object.entries(fragmentDeps)) {
     for (const b of depsA || []) {
-      if ((fragmentDeps[b] || []).includes(a)) {
-        // found a direct two-way dependency
-        cycles.push([a, b]);
-      }
+      if ((fragmentDeps[b] || []).includes(a)) cycles.push([a, b]);
     }
   }
 
-  // Step 3: prune direct cycles smartly (prefer keeping the larger fragment)
+  // Handle cycles by inlining one fragment into the other
   if (cycles.length) {
-    console.warn("⚠️ Fragment cycles detected, pruning:");
+    console.warn("⚠️ Fragment cycles detected, resolving...");
     const handled = new Set();
 
     for (const [a, b] of cycles) {
@@ -379,9 +397,8 @@ function generateGQLFiles(schemaPath, outDir) {
       if (handled.has(key)) continue;
       handled.add(key);
 
-      console.warn(`  Cycle detected: ${a} ↔ ${b}`);
+      console.warn(`  Found cycle: ${a} ↔ ${b}`);
 
-      // choose which fragment to inline based on size+deps
       const aScore = (rawFragments[a]?.split("\n").length || 0) + (fragmentDeps[a]?.length || 0);
       const bScore = (rawFragments[b]?.split("\n").length || 0) + (fragmentDeps[b]?.length || 0);
       const inlineTarget = aScore < bScore ? a : b;
@@ -389,38 +406,30 @@ function generateGQLFiles(schemaPath, outDir) {
 
       console.warn(`  → Inlining ${inlineSource} inside ${inlineTarget}`);
 
-      // remove dependency
       fragmentDeps[inlineTarget] = (fragmentDeps[inlineTarget] || []).filter(d => d !== inlineSource);
 
-      // get minimal scalar fields
       const inlineFields = getMinimalScalarFields(inlineSource, schema);
+      const targetFields = rawFragments[inlineTarget]?.match(/\b([a-zA-Z0-9_]+)\b/g) || [];
+      const duplicates = new Set(inlineFields.filter(f => targetFields.includes(f)));
 
-      // determine which ones actually conflict with the target fragment
-      const targetFragmentFields = rawFragments[inlineTarget]?.match(/\b([a-zA-Z0-9_]+)\b/g) || [];
-      const duplicateFields = new Set(inlineFields.filter(f => targetFragmentFields.includes(f)));
-
-      // build inlined field strings with aliasing only for duplicates (excluding 'id')
-      const inlineFieldStrings = inlineFields.map(f => {
-        if (f !== "id" && duplicateFields.has(f)) {
-          // only alias duplicates and skip 'id'
+      const inlineBody = inlineFields.map(f => {
+        if (f !== "id" && duplicates.has(f)) {
           const alias = `${inlineSource.charAt(0).toLowerCase() + inlineSource.slice(1)}${f.charAt(0).toUpperCase() + f.slice(1)}`;
           return `  ${alias}: ${f}`;
         }
         return `  ${f}`;
       }).join("\n");
 
-
       const fragPattern = new RegExp(
         `\\.\\.\\.\\s*${inlineSource.charAt(0).toLowerCase() + inlineSource.slice(1)}Fragment`,
         "g"
       );
 
-      rawFragments[inlineTarget] = rawFragments[inlineTarget].replace(fragPattern, inlineFieldStrings);
+      rawFragments[inlineTarget] = rawFragments[inlineTarget].replace(fragPattern, inlineBody);
     }
   }
 
-
-  // Step 4: write all fragments
+  // Write all generated fragments to files
   for (const [typeName, fragment] of Object.entries(rawFragments)) {
     fs.writeFileSync(
       path.join(fragmentsDir, `${toKebabCase(typeName)}.fragment.gql`),
@@ -428,10 +437,7 @@ function generateGQLFiles(schemaPath, outDir) {
     );
   }
 
-
-  console.log(
-    `✅ Generated GQL fragments and operations in ${outDir} ${RAW_MODE ? "(raw mode)" : ""}`
-  );
+  console.log(`✅ Generated GraphQL fragments and operations in ${outDir} ${RAW_MODE ? "(raw mode)" : ""}`);
 }
 
 module.exports = { generateGQLFiles };
